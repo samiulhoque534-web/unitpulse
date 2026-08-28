@@ -15,6 +15,7 @@ import { DutyVsPTGamesView } from './components/analytics/DutyVsPTGamesView';
 import { LeaveView } from './components/leave/LeaveView';
 import { ReportsView } from './components/reports/ReportsView';
 import { AuditLogsView } from './components/audit/AuditLogsView';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { RefreshCw } from 'lucide-react';
 
 const MainAppContent: React.FC = () => {
@@ -38,17 +39,19 @@ const MainAppContent: React.FC = () => {
 
   return (
     <AppLayout activeTab={activeTab} onSelectTab={setActiveTab}>
-      {activeTab === 'dashboard' && <DashboardView onNavigate={(t) => setActiveTab(t)} />}
-      {activeTab === 'personnel' && <PersonnelView />}
-      {activeTab === 'manpower' && <ManpowerView />}
-      {activeTab === 'duty' && <DutyView />}
-      {activeTab === 'duty_analytics' && <DutyAnalyticsView />}
-      {activeTab === 'pt' && <PTView />}
-      {activeTab === 'games' && <GamesView />}
-      {activeTab === 'duty_vs_pt' && <DutyVsPTGamesView />}
-      {activeTab === 'leave' && <LeaveView />}
-      {activeTab === 'reports' && <ReportsView />}
-      {activeTab === 'audit' && <AuditLogsView />}
+      <ErrorBoundary fallbackTitle="UnitPulse View Error">
+        {activeTab === 'dashboard' && <DashboardView onNavigate={(t) => setActiveTab(t)} />}
+        {activeTab === 'personnel' && <PersonnelView />}
+        {activeTab === 'manpower' && <ManpowerView />}
+        {activeTab === 'duty' && <DutyView />}
+        {activeTab === 'duty_analytics' && <DutyAnalyticsView />}
+        {activeTab === 'pt' && <PTView />}
+        {activeTab === 'games' && <GamesView />}
+        {activeTab === 'duty_vs_pt' && <DutyVsPTGamesView />}
+        {activeTab === 'leave' && <LeaveView />}
+        {activeTab === 'reports' && <ReportsView />}
+        {activeTab === 'audit' && <AuditLogsView />}
+      </ErrorBoundary>
     </AppLayout>
   );
 };
@@ -57,7 +60,9 @@ export function App() {
   return (
     <ToastProvider>
       <AuthProvider>
-        <MainAppContent />
+        <ErrorBoundary fallbackTitle="Application Crash Guard">
+          <MainAppContent />
+        </ErrorBoundary>
       </AuthProvider>
     </ToastProvider>
   );
