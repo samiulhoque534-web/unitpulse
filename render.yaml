@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: unitpulse-55fdamb
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build:client
+    startCommand: npm run start:server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true
+    disk:
+      name: unitpulse-data
+      mountPath: /var/data
+      sizeGB: 1
