@@ -2,6 +2,7 @@ import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { initSupabaseStorage, downloadCloudDatabase, uploadCloudDatabase } from './supabase';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,17 +15,37 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 let rawDb: SqlJsDatabase | null = null;
+let uploadTimer: NodeJS.Timeout | null = null;
 
 export async function initDatabase() {
   if (rawDb) return rawDb;
 
   const SQL = await initSqlJs();
 
-  if (fs.existsSync(DB_FILE)) {
-    const filebuffer = fs.readFileSync(DB_FILE);
-    rawDb = new SQL.Database(filebuffer);
-  } else {
-    rawDb = new SQL.Database();
+  // Initialize Supabase Storage
+  await initSupabaseStorage();
+
+  // 1. Attempt to restore latest database snapshot from Supabase Cloud
+  const cloudBuffer = await downloadCloudDatabase();
+
+  if (cloudBuffer && cloudBuffer.length > 0) {
+    try {
+      rawDb = new SQL.Database(cloudBuffer);
+      fs.writeFileSync(DB_FILE, cloudBuffer);
+      console.log('[UnitPulse] Restored active database directly from Supabase Cloud!');
+    } catch (err: any) {
+      console.warn('[UnitPulse] Cloud buffer parse warning:', err.message);
+    }
+  }
+
+  // 2. If not from cloud, load local file or create fresh
+  if (!rawDb) {
+    if (fs.existsSync(DB_FILE)) {
+      const filebuffer = fs.readFileSync(DB_FILE);
+      rawDb = new SQL.Database(filebuffer);
+    } else {
+      rawDb = new SQL.Database();
+    }
   }
 
   // Create UnitPulse Schema
@@ -58,17 +79,18 @@ export async function initDatabase() {
     CREATE TABLE IF NOT EXISTS duties (
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
-      personnel_id TEXT NOT NULL,
       duty_type TEXT NOT NULL,
-      duty_role TEXT,
-      shift_name TEXT,
+      personnel_id TEXT NOT NULL,
       location TEXT NOT NULL,
       start_time TEXT NOT NULL,
       end_time TEXT NOT NULL,
       duration_hours REAL NOT NULL,
       is_night_duty INTEGER NOT NULL DEFAULT 0,
       night_duty_hours REAL NOT NULL DEFAULT 0,
-      remarks TEXT,
+      duty_role TEXT,
+      shift_name TEXT,
+      kote_cycle TEXT,
+      kote_group INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       created_by TEXT,
@@ -170,6 +192,12 @@ export function saveDatabase() {
   const data = rawDb.export();
   const buffer = Buffer.from(data);
   fs.writeFileSync(DB_FILE, buffer);
+
+  // Debounced cloud sync to avoid spamming Supabase during bulk operations
+  if (uploadTimer) clearTimeout(uploadTimer);
+  uploadTimer = setTimeout(() => {
+    uploadCloudDatabase(buffer);
+  }, 1000);
 }
 
 // Wrapper providing synchronous prepare/get/all/run API
