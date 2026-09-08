@@ -11,7 +11,7 @@ import { manpowerRouter } from './routes/manpower';
 import { dutyRouter } from './routes/duties';
 import { ptRouter } from './routes/pt';
 import { gamesRouter } from './routes/games';
-import { leaveRouter } from './routes/leave';
+import { leaveRouter, syncLeaveStatusWithPersonnel } from './routes/leave';
 import { analyticsRouter } from './routes/analytics';
 import { reportsRouter } from './routes/reports';
 import { auditRouter } from './routes/audit';
@@ -81,7 +81,9 @@ async function startServer() {
   } catch (e) {
     console.log('[UnitPulse] Seeding fresh database...');
     await seedDatabase();
-  }
+  // Synchronize leave status with personnel database
+  console.log('[UnitPulse] Synchronizing leave records with personnel database...');
+  syncLeaveStatusWithPersonnel();
 
   app.listen(PORT, () => {
     console.log('=======================================================');

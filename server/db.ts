@@ -182,6 +182,9 @@ export async function initDatabase() {
   try {
     rawDb.exec('ALTER TABLE duties ADD COLUMN kote_group INTEGER;');
   } catch (e) {}
+  try {
+    rawDb.exec('ALTER TABLE personnel ADD COLUMN previous_status TEXT;');
+  } catch (e) {}
 
   saveDatabase();
   return rawDb;

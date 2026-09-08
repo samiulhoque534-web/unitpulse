@@ -6,8 +6,102 @@ import { getRankPLeaveLimit } from '../../src/utils/constants';
 
 export const leaveRouter = Router();
 
+/**
+ * Automatically synchronizes Leave records with the Personal Database.
+ * - If a soldier is currently on active P Leave or C Leave (today is within leave dates and status is ACTIVE),
+ *   sets Personal Database status to 'LEAVE' and records any previous active status (Hospital, Course, Attachment, etc.).
+ * - When the sanctioned leave period ends or is returned, if the soldier has no other active leave:
+ *   restores their preserved active status (e.g. Hospital, Course, Temporary Attachment) if one existed,
+ *   or resets status to 'PRESENT'.
+ */
+export function syncLeaveStatusWithPersonnel() {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const now = new Date().toISOString();
+
+  try {
+    const activePersonnel: any[] = db.prepare('SELECT id, army_number, rank, name, current_status, previous_status FROM personnel WHERE is_active = 1').all();
+
+    for (const p of activePersonnel) {
+      // Find if soldier has an active leave record covering today
+      const activeLeave: any = db.prepare(`
+        SELECT * FROM leave_records
+        WHERE personnel_id = ? AND status = 'ACTIVE' AND start_date <= ? AND end_date >= ?
+        ORDER BY start_date DESC
+        LIMIT 1
+      `).get(p.id, today, today);
+
+      if (activeLeave) {
+        if (p.current_status !== 'LEAVE') {
+          // Remember previous active status if they were on Hospital, Course, Attachment, etc.
+          const prev = (p.current_status && p.current_status !== 'PRESENT' && p.current_status !== 'LEAVE')
+            ? p.current_status
+            : (p.previous_status || null);
+
+          db.prepare(`
+            UPDATE personnel
+            SET current_status = 'LEAVE',
+                status_reason = ?,
+                previous_status = ?,
+                updated_at = ?
+            WHERE id = ?
+          `).run(
+            `On ${activeLeave.leave_type.replace('_', ' ')} (${activeLeave.start_date} to ${activeLeave.end_date})`,
+            prev,
+            now,
+            p.id
+          );
+        }
+      } else {
+        // Expire past active leaves where end_date < today
+        const expiredLeaves: any[] = db.prepare(`
+          SELECT id, end_date FROM leave_records
+          WHERE personnel_id = ? AND status = 'ACTIVE' AND end_date < ?
+        `).all(p.id, today);
+
+        for (const exp of expiredLeaves) {
+          db.prepare(`
+            UPDATE leave_records
+            SET status = 'RETURNED',
+                actual_return_date = COALESCE(actual_return_date, ?),
+                updated_at = ?
+            WHERE id = ?
+          `).run(exp.end_date, now, exp.id);
+        }
+
+        // If soldier was marked 'LEAVE', verify if any active leave remains
+        if (p.current_status === 'LEAVE') {
+          const remainingActive = db.prepare(`
+            SELECT id FROM leave_records
+            WHERE personnel_id = ? AND status = 'ACTIVE' AND start_date <= ? AND end_date >= ?
+          `).get(p.id, today, today);
+
+          if (!remainingActive) {
+            // Restore preserved active status if applicable, otherwise reset to PRESENT
+            const preservedStatus = (p.previous_status && ['HOSPITAL', 'COURSE', 'TY_DUTY', 'ATTACHMENT', 'OTHER'].includes(p.previous_status))
+              ? p.previous_status
+              : 'PRESENT';
+            const statusReason = preservedStatus === 'PRESENT' ? null : `Preserved active status: ${preservedStatus}`;
+
+            db.prepare(`
+              UPDATE personnel
+              SET current_status = ?,
+                  status_reason = ?,
+                  previous_status = NULL,
+                  updated_at = ?
+              WHERE id = ?
+            `).run(preservedStatus, statusReason, now, p.id);
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error('[syncLeaveStatusWithPersonnel] Error during leave sync:', err.message);
+  }
+}
+
 // 1. Get Leave Records
 leaveRouter.get('/records', authenticateUser, (req, res) => {
+  syncLeaveStatusWithPersonnel();
   const { leaveType, status, personnelId, search, year } = req.query;
 
   let query = `
@@ -160,23 +254,24 @@ leaveRouter.post('/', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICER'
     }
   }
 
-  // --- RULE 2: C LEAVE 3-MONTH CADENCE ADVISORY CHECK ---
+  // --- RULE 2: 3-MONTH CADENCE ADVISORY CHECK (P Leave or C Leave) ---
   let cLeaveAdvisory = null;
-  if (leaveType === 'C_LEAVE') {
-    const lastCLeave: any = db.prepare(`
+  if (leaveType === 'C_LEAVE' || leaveType === 'P_LEAVE') {
+    const lastLeave: any = db.prepare(`
       SELECT * FROM leave_records
-      WHERE personnel_id = ? AND leave_type = 'C_LEAVE'
+      WHERE personnel_id = ? AND leave_type IN ('P_LEAVE', 'C_LEAVE')
       ORDER BY start_date DESC
       LIMIT 1
     `).get(personnelId);
 
-    if (lastCLeave && !forceOverride) {
-      const lastEndDate = parseISO(lastCLeave.end_date || lastCLeave.start_date);
+    if (lastLeave && !forceOverride) {
+      const lastEndDate = parseISO(lastLeave.end_date || lastLeave.start_date);
       const newStartDate = parseISO(startDate);
       const intervalDays = differenceInDays(newStartDate, lastEndDate);
 
       if (intervalDays < 90) {
-        cLeaveAdvisory = `C Leave interval is less than 3 months (${intervalDays} days since last C Leave on ${lastCLeave.end_date}).`;
+        const lastType = lastLeave.leave_type === 'P_LEAVE' ? 'P Leave' : 'C Leave';
+        cLeaveAdvisory = `Leave interval is less than 3 months (${intervalDays} days since last ${lastType} on ${lastLeave.end_date || lastLeave.start_date}).`;
       }
     }
   }
@@ -206,12 +301,20 @@ leaveRouter.post('/', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICER'
 
   // If status is ACTIVE, automatically update soldier's current_status to 'LEAVE'
   if (initialStatus === 'ACTIVE') {
-    db.prepare('UPDATE personnel SET current_status = "LEAVE", status_reason = ?, updated_at = ? WHERE id = ?').run(
+    const prev = (soldier.current_status && soldier.current_status !== 'PRESENT' && soldier.current_status !== 'LEAVE')
+      ? soldier.current_status
+      : (soldier.previous_status || null);
+
+    db.prepare('UPDATE personnel SET current_status = "LEAVE", status_reason = ?, previous_status = ?, updated_at = ? WHERE id = ?').run(
       `On ${leaveType.replace('_', ' ')} (${startDate} to ${endDate})`,
+      prev,
       now,
       personnelId
     );
   }
+
+  // Trigger comprehensive synchronization
+  syncLeaveStatusWithPersonnel();
 
   logAudit(req, 'SANCTION_LEAVE', 'LEAVE', id, `Sanctioned ${calculatedDays} days ${leaveType} for ${soldier.rank} ${soldier.name} (${soldier.army_number})`);
 
@@ -287,8 +390,13 @@ leaveRouter.put('/:id', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICE
 
   // Sync soldier's current status
   if (updatedStatus === 'ACTIVE') {
-    db.prepare('UPDATE personnel SET current_status = "LEAVE", status_reason = ?, updated_at = ? WHERE id = ?').run(
+    const prev = (soldier.current_status && soldier.current_status !== 'PRESENT' && soldier.current_status !== 'LEAVE')
+      ? soldier.current_status
+      : (soldier.previous_status || null);
+
+    db.prepare('UPDATE personnel SET current_status = "LEAVE", status_reason = ?, previous_status = ?, updated_at = ? WHERE id = ?').run(
       `On ${newLeaveType.replace('_', ' ')} (${newStartDate} to ${newEndDate})`,
+      prev,
       now,
       leave.personnel_id
     );
@@ -296,12 +404,21 @@ leaveRouter.put('/:id', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICE
     // Check if there are any other active leaves
     const otherActive = db.prepare('SELECT id FROM leave_records WHERE personnel_id = ? AND id != ? AND status = "ACTIVE"').get(leave.personnel_id, leave.id);
     if (!otherActive) {
-      db.prepare('UPDATE personnel SET current_status = "PRESENT", status_reason = NULL, updated_at = ? WHERE id = ?').run(
+      const preservedStatus = (soldier.previous_status && ['HOSPITAL', 'COURSE', 'TY_DUTY', 'ATTACHMENT', 'OTHER'].includes(soldier.previous_status))
+        ? soldier.previous_status
+        : 'PRESENT';
+      const statusReason = preservedStatus === 'PRESENT' ? null : `Preserved active status: ${preservedStatus}`;
+
+      db.prepare('UPDATE personnel SET current_status = ?, status_reason = ?, previous_status = NULL, updated_at = ? WHERE id = ?').run(
+        preservedStatus,
+        statusReason,
         now,
         leave.personnel_id
       );
     }
   }
+
+  syncLeaveStatusWithPersonnel();
 
   logAudit(req, 'EDIT_LEAVE', 'LEAVE', leave.id, `Updated leave record for ${soldier.rank} ${soldier.name} (${soldier.army_number})`);
 
@@ -325,11 +442,20 @@ leaveRouter.delete('/:id', authenticateUser, requirePermission(['2IC', 'DUTY_OFF
   const remainingActiveLeave = db.prepare('SELECT id FROM leave_records WHERE personnel_id = ? AND status = "ACTIVE"').get(leave.personnel_id);
 
   if (!remainingActiveLeave && soldier && soldier.current_status === 'LEAVE') {
-    db.prepare('UPDATE personnel SET current_status = "PRESENT", status_reason = NULL, updated_at = ? WHERE id = ?').run(
+    const preservedStatus = (soldier.previous_status && ['HOSPITAL', 'COURSE', 'TY_DUTY', 'ATTACHMENT', 'OTHER'].includes(soldier.previous_status))
+      ? soldier.previous_status
+      : 'PRESENT';
+    const statusReason = preservedStatus === 'PRESENT' ? null : `Preserved active status: ${preservedStatus}`;
+
+    db.prepare('UPDATE personnel SET current_status = ?, status_reason = ?, previous_status = NULL, updated_at = ? WHERE id = ?').run(
+      preservedStatus,
+      statusReason,
       now,
       leave.personnel_id
     );
   }
+
+  syncLeaveStatusWithPersonnel();
 
   logAudit(
     req,
@@ -351,6 +477,7 @@ leaveRouter.put('/:id/return', authenticateUser, requirePermission(['2IC', 'DUTY
   const leave: any = db.prepare('SELECT * FROM leave_records WHERE id = ?').get(req.params.id);
   if (!leave) return res.status(404).json({ error: 'Leave record not found.' });
 
+  const soldier: any = db.prepare('SELECT * FROM personnel WHERE id = ?').get(leave.personnel_id);
   const now = new Date().toISOString();
   const returnDate = actualReturnDate || format(new Date(), 'yyyy-MM-dd');
 
@@ -361,19 +488,29 @@ leaveRouter.put('/:id/return', authenticateUser, requirePermission(['2IC', 'DUTY
     leave.id
   );
 
-  // Automatically revert soldier's status in personnel table to PRESENT
-  db.prepare('UPDATE personnel SET current_status = "PRESENT", status_reason = NULL, updated_at = ? WHERE id = ?').run(
+  // Preserve previous active status if one was preserved (e.g. HOSPITAL, COURSE, TY_DUTY, ATTACHMENT)
+  const preservedStatus = (soldier?.previous_status && ['HOSPITAL', 'COURSE', 'TY_DUTY', 'ATTACHMENT', 'OTHER'].includes(soldier.previous_status))
+    ? soldier.previous_status
+    : 'PRESENT';
+  const statusReason = preservedStatus === 'PRESENT' ? null : `Preserved active status: ${preservedStatus}`;
+
+  db.prepare('UPDATE personnel SET current_status = ?, status_reason = ?, previous_status = NULL, updated_at = ? WHERE id = ?').run(
+    preservedStatus,
+    statusReason,
     now,
     leave.personnel_id
   );
 
-  logAudit(req, 'RETURN_LEAVE', 'LEAVE', leave.id, `Soldier returned from leave on ${returnDate}`);
+  syncLeaveStatusWithPersonnel();
 
-  return res.json({ message: 'Personnel marked returned and restored to PRESENT in unit lines.' });
+  logAudit(req, 'RETURN_LEAVE', 'LEAVE', leave.id, `Soldier returned from leave on ${returnDate}. Restored status: ${preservedStatus}`);
+
+  return res.json({ message: `Personnel marked returned and restored to ${preservedStatus} in unit lines.` });
 });
 
-// 7. C Leave Reminders (Due in 15 Days, Overdue, Upcoming)
+// 7. Leave Reminders (Due in 15 Days, Overdue, Upcoming - considering both P Leave & C Leave)
 leaveRouter.get('/reminders', authenticateUser, (req, res) => {
+  syncLeaveStatusWithPersonnel();
   const activePersonnel = db.prepare('SELECT * FROM personnel WHERE is_active = 1').all();
   const now = new Date();
 
@@ -389,14 +526,15 @@ leaveRouter.get('/reminders', authenticateUser, (req, res) => {
   `).all(format(now, 'yyyy-MM-dd'));
 
   activePersonnel.forEach((p: any) => {
-    const lastCLeave: any = db.prepare(`
+    // Check latest leave of type P_LEAVE or C_LEAVE
+    const lastLeave: any = db.prepare(`
       SELECT * FROM leave_records
-      WHERE personnel_id = ? AND leave_type = 'C_LEAVE'
+      WHERE personnel_id = ? AND leave_type IN ('P_LEAVE', 'C_LEAVE')
       ORDER BY start_date DESC
       LIMIT 1
     `).get(p.id);
 
-    const referenceDateStr = lastCLeave ? (lastCLeave.end_date || lastCLeave.start_date) : `${now.getFullYear()}-01-01`;
+    const referenceDateStr = lastLeave ? (lastLeave.end_date || lastLeave.start_date) : (p.unit_joining_date || `${now.getFullYear()}-01-01`);
 
     if (referenceDateStr) {
       try {
@@ -414,8 +552,11 @@ leaveRouter.get('/reminders', authenticateUser, (req, res) => {
           trade: p.trade,
           appointment: p.appointment,
           currentStatus: p.current_status,
+          lastLeaveType: lastLeave ? (lastLeave.leave_type === 'P_LEAVE' ? 'P Leave' : 'C Leave') : 'None',
+          lastLeaveDays: lastLeave ? lastLeave.total_days : 0,
+          lastLeaveDate: referenceDateStr,
           lastCLeaveDate: referenceDateStr,
-          lastCLeaveId: lastCLeave ? lastCLeave.id : null,
+          lastCLeaveId: lastLeave ? lastLeave.id : null,
           nextCLeaveDueDate: dueDateStr,
           daysUntilDue,
         };
@@ -441,8 +582,9 @@ leaveRouter.get('/reminders', authenticateUser, (req, res) => {
   });
 });
 
-// 8. 3-Month Leave Forecast & Register (Month 1, Month 2, Month 3 columns & individual entries)
+// 8. 3-Month Leave Forecast & Register (considering both P Leave & C Leave in single cadence)
 leaveRouter.get('/forecast-3m', authenticateUser, (req, res) => {
+  syncLeaveStatusWithPersonnel();
   const activePersonnel = db.prepare('SELECT * FROM personnel WHERE is_active = 1').all();
   const now = new Date();
 
@@ -464,14 +606,15 @@ leaveRouter.get('/forecast-3m', authenticateUser, (req, res) => {
   const registerEntries: any[] = [];
 
   activePersonnel.forEach((p: any) => {
-    const lastCLeave: any = db.prepare(`
+    // Query latest leave whether P Leave or C Leave
+    const lastLeave: any = db.prepare(`
       SELECT * FROM leave_records
-      WHERE personnel_id = ? AND leave_type = 'C_LEAVE'
+      WHERE personnel_id = ? AND leave_type IN ('P_LEAVE', 'C_LEAVE')
       ORDER BY start_date DESC
       LIMIT 1
     `).get(p.id);
 
-    const refDateStr = lastCLeave ? (lastCLeave.end_date || lastCLeave.start_date) : `${now.getFullYear()}-01-01`;
+    const refDateStr = lastLeave ? (lastLeave.end_date || lastLeave.start_date) : (p.unit_joining_date || `${now.getFullYear()}-01-01`);
     if (refDateStr) {
       try {
         const refDate = parseISO(refDateStr);
@@ -489,14 +632,16 @@ leaveRouter.get('/forecast-3m', authenticateUser, (req, res) => {
         }
 
         const soldierEntry = {
-          leaveId: lastCLeave ? lastCLeave.id : null,
+          leaveId: lastLeave ? lastLeave.id : null,
           personnelId: p.id,
           armyNumber: p.army_number,
           rank: p.rank,
           name: p.name,
           trade: p.trade,
           appointment: p.appointment,
-          cLeaveDays: lastCLeave ? lastCLeave.total_days : 7,
+          lastLeaveType: lastLeave ? (lastLeave.leave_type === 'P_LEAVE' ? 'P Leave' : 'C Leave') : 'None',
+          lastLeaveDays: lastLeave ? lastLeave.total_days : 0,
+          cLeaveDays: lastLeave ? lastLeave.total_days : 7,
           lastLeaveDate: refDateStr,
           dueDate: dueDateFormatted,
           daysUntilDue,

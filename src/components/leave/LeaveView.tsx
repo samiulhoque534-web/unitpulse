@@ -394,8 +394,8 @@ export const LeaveView: React.FC = () => {
               <div className="flex items-center space-x-2">
                 <AlertTriangle className="w-5 h-5 text-rose-400" />
                 <div>
-                  <h4 className="text-sm font-bold text-white uppercase">C LEAVE OVERDUE NOMINAL ROLL</h4>
-                  <p className="text-xs text-slate-400">Personnel who have exceeded 90 days since their last C Leave</p>
+                  <h4 className="text-sm font-bold text-white uppercase">LEAVE CADENCE OVERDUE NOMINAL ROLL</h4>
+                  <p className="text-xs text-slate-400">Personnel who have exceeded 90 days since their last leave (P Leave or C Leave)</p>
                 </div>
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
@@ -410,7 +410,7 @@ export const LeaveView: React.FC = () => {
                     <th className="p-3">Army No</th>
                     <th className="p-3 font-sans">Rank & Name</th>
                     <th className="p-3 font-sans">Trade</th>
-                    <th className="p-3">Last Leave Date</th>
+                    <th className="p-3">Last Leave</th>
                     <th className="p-3">Expected Due Date</th>
                     <th className="p-3 text-center text-rose-400 font-bold">Days Overdue</th>
                     <th className="p-3 text-right">Action</th>
@@ -420,7 +420,7 @@ export const LeaveView: React.FC = () => {
                   {reminders.overdue.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="p-6 text-center text-slate-500 font-sans">
-                        No soldiers currently overdue for C Leave.
+                        No soldiers currently overdue for leave.
                       </td>
                     </tr>
                   ) : (
@@ -434,8 +434,11 @@ export const LeaveView: React.FC = () => {
                           </div>
                         </td>
                         <td className="p-3 font-sans text-army-400 font-bold">{p.trade}</td>
-                        <td className="p-3 text-slate-400">{p.lastCLeaveDate}</td>
-                        <td className="p-3 text-rose-300 font-bold">{p.nextCLeaveDueDate}</td>
+                        <td className="p-3 text-slate-300">
+                          <span className="block font-bold">{p.lastLeaveDate}</span>
+                          <span className="text-[10px] text-amber-400 font-sans">{p.lastLeaveType || 'Leave'}</span>
+                        </td>
+                        <td className="p-3 text-rose-300 font-bold">{p.nextCLeaveDueDate || p.nextDueDate}</td>
                         <td className="p-3 text-center font-bold text-rose-400 text-sm">
                           +{p.daysOverdue} days
                         </td>
@@ -467,8 +470,8 @@ export const LeaveView: React.FC = () => {
               <div className="flex items-center space-x-2">
                 <AlertCircle className="w-5 h-5 text-amber-400" />
                 <div>
-                  <h4 className="text-sm font-bold text-white uppercase">C LEAVE DUE IN 15 DAYS</h4>
-                  <p className="text-xs text-slate-400">Personnel approaching their 90-day C Leave due date</p>
+                  <h4 className="text-sm font-bold text-white uppercase">LEAVE CADENCE DUE IN 15 DAYS</h4>
+                  <p className="text-xs text-slate-400">Personnel approaching their 90-day leave due date (from last P Leave or C Leave)</p>
                 </div>
               </div>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
@@ -483,7 +486,7 @@ export const LeaveView: React.FC = () => {
                     <th className="p-3">Army No</th>
                     <th className="p-3 font-sans">Rank & Name</th>
                     <th className="p-3 font-sans">Trade</th>
-                    <th className="p-3">Last Leave Date</th>
+                    <th className="p-3">Last Leave</th>
                     <th className="p-3">Expected Due Date</th>
                     <th className="p-3 text-center text-amber-400 font-bold">Days Until Due</th>
                     <th className="p-3 text-right">Action</th>
@@ -507,8 +510,11 @@ export const LeaveView: React.FC = () => {
                           </div>
                         </td>
                         <td className="p-3 font-sans text-army-400 font-bold">{p.trade}</td>
-                        <td className="p-3 text-slate-400">{p.lastCLeaveDate}</td>
-                        <td className="p-3 text-amber-300 font-bold">{p.nextCLeaveDueDate}</td>
+                        <td className="p-3 text-slate-300">
+                          <span className="block font-bold">{p.lastLeaveDate}</span>
+                          <span className="text-[10px] text-amber-400 font-sans">{p.lastLeaveType || 'Leave'}</span>
+                        </td>
+                        <td className="p-3 text-amber-300 font-bold">{p.nextCLeaveDueDate || p.nextDueDate}</td>
                         <td className="p-3 text-center font-bold text-amber-400 text-sm">
                           In {p.daysUntilDue} days
                         </td>

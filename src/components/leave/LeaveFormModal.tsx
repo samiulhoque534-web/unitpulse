@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '../common/Modal';
 import { LeaveType, Personnel, LeaveRecord } from '../../types';
 import { LEAVE_TYPES, getRankPLeaveLimit, isOfficerRank } from '../../utils/constants';
+import { RankBadge, StatusBadge } from '../common/Badge';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { format, differenceInDays, parseISO } from 'date-fns';
-import { AlertCircle, AlertTriangle, CalendarRange, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CalendarRange, ShieldAlert, CheckCircle2, Search, X, Check } from 'lucide-react';
 
 interface LeaveFormModalProps {
   isOpen: boolean;
@@ -26,6 +27,10 @@ export const LeaveFormModal: React.FC<LeaveFormModalProps> = ({
   const [personnelList, setPersonnelList] = useState<Personnel[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [soldierEntitlement, setSoldierEntitlement] = useState<any>(null);
+
+  // Searchable Soldier Selection State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   const [formData, setFormData] = useState({
     personnelId: initialPersonnelId || '',
@@ -51,6 +56,8 @@ export const LeaveFormModal: React.FC<LeaveFormModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setSearchQuery('');
+      setIsSearching(!initialPersonnelId && !leaveRecord);
       api.getPersonnel({ isActive: true }).then((res) => {
         setPersonnelList(res.personnel);
         if (leaveRecord) {
@@ -86,6 +93,18 @@ export const LeaveFormModal: React.FC<LeaveFormModalProps> = ({
       });
     }
   }, [isOpen, initialPersonnelId, leaveRecord]);
+
+  const filteredPersonnel = useMemo(() => {
+    if (!searchQuery.trim()) return personnelList;
+    const q = searchQuery.toLowerCase().trim();
+    return personnelList.filter(
+      (p) =>
+        p.armyNumber.toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q) ||
+        p.rank.toLowerCase().includes(q) ||
+        p.trade.toLowerCase().includes(q)
+    );
+  }, [personnelList, searchQuery]);
 
   const handleSelectSoldier = (pId: string) => {
     setFormData({ ...formData, personnelId: pId });
@@ -178,23 +197,137 @@ export const LeaveFormModal: React.FC<LeaveFormModalProps> = ({
     >
       <form onSubmit={handleSubmit} className="space-y-4 text-xs">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Soldier Selection */}
-          <div className="sm:col-span-2">
-            <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-              Select Soldier *
-            </label>
-            <select
-              value={formData.personnelId}
-              disabled={Boolean(leaveRecord)}
-              onChange={(e) => handleSelectSoldier(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-tactical-950 border border-slate-700 text-white font-semibold disabled:opacity-60"
-            >
-              {personnelList.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.rank} {p.name} ({p.armyNumber}) - {p.trade} ({p.currentStatus})
-                </option>
-              ))}
-            </select>
+          {/* Searchable Soldier Selection */}
+          <div className="sm:col-span-2 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                Select Soldier *
+              </label>
+              {!leaveRecord && selectedSoldier && (
+                <button
+                  type="button"
+                  onClick={() => setIsSearching(!isSearching)}
+                  className="text-amber-400 hover:text-amber-300 text-[11px] font-bold flex items-center space-x-1 transition-colors"
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  <span>{isSearching ? 'Close Search' : 'Search / Change Soldier'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Selected Soldier Display Card */}
+            {selectedSoldier && !isSearching && (
+              <div className="p-3 rounded-xl bg-tactical-950 border border-slate-700 flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <RankBadge rank={selectedSoldier.rank} />
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <strong className="text-white text-xs">{selectedSoldier.name}</strong>
+                      <span className="font-mono text-amber-400 text-xs font-bold">({selectedSoldier.armyNumber})</span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                      Trade: <span className="text-slate-200 font-semibold">{selectedSoldier.trade}</span> • Appt: <span className="text-slate-300">{selectedSoldier.appointment || 'General Duty'}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <StatusBadge status={selectedSoldier.currentStatus} />
+                  {!leaveRecord && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSearching(true)}
+                      className="px-2.5 py-1 rounded-lg bg-tactical-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[11px] font-bold border border-slate-600 transition-colors"
+                    >
+                      Change
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Search Input & Interactive Dropdown */}
+            {(!selectedSoldier || isSearching) && !leaveRecord && (
+              <div className="space-y-2 p-3 rounded-xl bg-tactical-950 border border-slate-700">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Search by Army No, Name, or Rank (e.g. 12345, Rahman, Sainik)..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 rounded-xl bg-tactical-900 border border-slate-600 text-white placeholder-slate-500 font-medium focus:outline-none focus:border-amber-500 text-xs"
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
+                  <span>Found {filteredPersonnel.length} matching personnel</span>
+                  {selectedSoldier && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSearching(false)}
+                      className="text-slate-400 hover:text-slate-200"
+                    >
+                      Keep Current ({selectedSoldier.name})
+                    </button>
+                  )}
+                </div>
+
+                {/* Filtered Scrollable List */}
+                <div className="max-h-56 overflow-y-auto space-y-1 pr-1 divide-y divide-slate-800/60">
+                  {filteredPersonnel.length === 0 ? (
+                    <div className="p-4 text-center text-slate-500 text-xs italic">
+                      No personnel matching "{searchQuery}" found.
+                    </div>
+                  ) : (
+                    filteredPersonnel.map((p) => {
+                      const isSelected = p.id === formData.personnelId;
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => {
+                            handleSelectSoldier(p.id);
+                            setIsSearching(false);
+                            setSearchQuery('');
+                          }}
+                          className={`p-2 rounded-lg cursor-pointer transition-all flex items-center justify-between text-xs ${
+                            isSelected
+                              ? 'bg-amber-500/10 border border-amber-500/40 text-white'
+                              : 'hover:bg-tactical-900 text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RankBadge rank={p.rank} />
+                            <div>
+                              <div className="flex items-center space-x-1.5">
+                                <strong className="text-white">{p.name}</strong>
+                                <span className="font-mono text-amber-400 text-[11px] font-bold">({p.armyNumber})</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                {p.trade} • {p.appointment || 'General Duty'}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-1.5">
+                            <StatusBadge status={p.currentStatus} />
+                            {isSelected && <Check className="w-4 h-4 text-emerald-400" />}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Leave Type */}

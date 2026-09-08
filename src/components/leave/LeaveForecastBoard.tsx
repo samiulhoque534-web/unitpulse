@@ -84,10 +84,10 @@ export const LeaveForecastBoard: React.FC<LeaveForecastBoardProps> = ({ onSelect
         <div>
           <h3 className="text-sm sm:text-base font-bold text-white uppercase tracking-wider flex items-center gap-2">
             <CalendarRange className="w-4 h-4 text-amber-400" />
-            3-Month Forward C Leave Register & Forecast
+            3-Month Forward Leave Register & Forecast
           </h3>
           <p className="text-xs text-slate-400">
-            Cadence Ledger: <strong>{UNIT_NAME}</strong> • 90-Day Periodic Cycle with Edit & Safe Deletion
+            Cadence Ledger: <strong>{UNIT_NAME}</strong> • Unified 90-Day Periodic Cycle (P Leave & C Leave) with Edit & Safe Deletion
           </p>
         </div>
 
@@ -137,7 +137,7 @@ export const LeaveForecastBoard: React.FC<LeaveForecastBoardProps> = ({ onSelect
               <div className="mt-3 space-y-2 max-h-80 overflow-y-auto pr-1">
                 {col.personnel.length === 0 ? (
                   <div className="p-6 text-center text-slate-500 text-xs italic">
-                    No soldiers due for C Leave in this month.
+                    No soldiers due for leave in this month.
                   </div>
                 ) : (
                   col.personnel.map((p: any) => (
@@ -161,7 +161,7 @@ export const LeaveForecastBoard: React.FC<LeaveForecastBoardProps> = ({ onSelect
                       </div>
 
                       <div className="text-[10px] text-slate-500 flex justify-between items-center pt-1 border-t border-slate-800/80">
-                        <span>Last C Leave: {p.lastLeaveDate}</span>
+                        <span>Last: <strong className="text-slate-300">{p.lastLeaveType || 'Leave'}</strong> ({p.lastLeaveDate})</span>
                         {onSelectSoldierForLeave && (
                           <button
                             type="button"
@@ -202,8 +202,8 @@ export const LeaveForecastBoard: React.FC<LeaveForecastBoardProps> = ({ onSelect
             <thead className="bg-tactical-950 text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
               <tr>
                 <th className="p-3">Personnel</th>
-                <th className="p-3">Date (Last Leave)</th>
-                <th className="p-3 text-center">C Leave Days</th>
+                <th className="p-3">Last Leave Event</th>
+                <th className="p-3 text-center">Duration</th>
                 <th className="p-3">Next Due</th>
                 <th className="p-3">Status</th>
                 <th className="p-3 text-right">Action</th>
@@ -228,8 +228,13 @@ export const LeaveForecastBoard: React.FC<LeaveForecastBoardProps> = ({ onSelect
                         </div>
                       </div>
                     </td>
-                    <td className="p-3 text-slate-300">{row.lastLeaveDate}</td>
-                    <td className="p-3 text-center font-bold text-emerald-400">{row.cLeaveDays} days</td>
+                    <td className="p-3 font-sans">
+                      <span className="text-slate-200 font-bold block font-mono text-xs">{row.lastLeaveDate}</span>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold">
+                        {row.lastLeaveType || 'Leave'}
+                      </span>
+                    </td>
+                    <td className="p-3 text-center font-bold text-emerald-400">{row.lastLeaveDays || row.cLeaveDays || 0} days</td>
                     <td className="p-3 font-bold text-amber-300">{row.dueDate}</td>
                     <td className="p-3">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${

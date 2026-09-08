@@ -3,11 +3,13 @@ import { db } from '../db';
 import { authenticateUser, requirePermission, logAudit, AuthRequest } from '../auth';
 import { subDays, parseISO, differenceInDays } from 'date-fns';
 import { getRankPLeaveLimit } from '../../src/utils/constants';
+import { syncLeaveStatusWithPersonnel } from './leave';
 
 export const personnelRouter = Router();
 
 // 1. List Personnel with Search and Filtering (Contains ONLY: Army Number, Rank, Name, Trade, Appointment, Status)
 personnelRouter.get('/', authenticateUser, (req, res) => {
+  syncLeaveStatusWithPersonnel();
   const { search, rank, trade, status, isActive } = req.query;
 
   let query = 'SELECT * FROM personnel WHERE 1=1';
@@ -159,12 +161,12 @@ personnelRouter.get('/:id', authenticateUser, (req, res) => {
   const pLeaveUsagePct = pLeaveLimit > 0 ? Math.round((pLeaveDaysUsed / pLeaveLimit) * 100) : 0;
   const pLeaveLimitReached = pLeaveDaysUsed >= pLeaveLimit;
 
-  // C Leave History & Due calculation (cadence: 3 months = ~90 days)
+  // Leave History & Due calculation (cadence: 3 months = ~90 days from latest P Leave OR C Leave)
   const cLeavesThisYear = thisYearLeaves.filter((l) => l.leave_type === 'C_LEAVE');
   const cLeaveTotalDays = cLeavesThisYear.reduce((acc, l) => acc + (l.total_days || 0), 0);
 
-  const lastCLeave = leaves.find((l) => l.leave_type === 'C_LEAVE');
-  let lastCLeaveDate = lastCLeave ? lastCLeave.start_date : `${currentYear}-01-01`;
+  const lastCadenceLeave = leaves.find((l) => l.leave_type === 'P_LEAVE' || l.leave_type === 'C_LEAVE');
+  let lastCLeaveDate = lastCadenceLeave ? (lastCadenceLeave.end_date || lastCadenceLeave.start_date) : (p.unit_joining_date || `${currentYear}-01-01`);
   let daysSinceLastCLeave = 0;
   let nextCLeaveDueDate = '';
   let daysUntilCLeaveDue = 90;

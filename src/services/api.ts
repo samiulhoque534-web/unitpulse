@@ -304,7 +304,7 @@ export const api = {
     }>('/leave/reminders'),
 
   get3MonthForecast: () =>
-    request<{ forecast: { month: string; monthKey: string; personnel: any[] }[] }>('/leave/forecast-3m'),
+    request<{ forecast: { month: string; monthKey: string; personnel: any[] }[]; registerEntries?: any[] }>('/leave/forecast-3m'),
 
   getYearlyLeaveSummary: (year?: number) =>
     request<{ year: number; summary: any[] }>(`/leave/yearly-summary?year=${year || ''}`),

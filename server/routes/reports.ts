@@ -5,11 +5,13 @@ import { format, subDays, addDays, parseISO, differenceInDays } from 'date-fns';
 import { TRADES, DEFAULT_TRADE_AUTHORIZED, getRankPLeaveLimit } from '../../src/utils/constants';
 import { computeDutyActiveStatus } from './duties';
 import { getTradeAuthorizedMap } from './manpower';
+import { syncLeaveStatusWithPersonnel } from './leave';
 
 export const reportsRouter = Router();
 
 // GET /api/reports/generate?reportType=...
 reportsRouter.get('/generate', authenticateUser, (req, res) => {
+  syncLeaveStatusWithPersonnel();
   const reportType = (req.query.reportType as string) || '1_DAILY_MANPOWER';
   const reportDate = (req.query.date as string) || format(new Date(), 'yyyy-MM-dd');
   const selectedYear = parseInt((req.query.year as string) || String(parseISO(reportDate).getFullYear()), 10);
@@ -529,8 +531,8 @@ reportsRouter.get('/generate', authenticateUser, (req, res) => {
       const dueList: any[] = [];
 
       allActivePersonnel.forEach((p: any) => {
-        const lastCLeave: any = db.prepare(`SELECT * FROM leave_records WHERE personnel_id = ? AND leave_type = 'C_LEAVE' ORDER BY start_date DESC LIMIT 1`).get(p.id);
-        const refDateStr = lastCLeave ? (lastCLeave.end_date || lastCLeave.start_date) : `${now.getFullYear()}-01-01`;
+        const lastLeave: any = db.prepare(`SELECT * FROM leave_records WHERE personnel_id = ? AND leave_type IN ('P_LEAVE', 'C_LEAVE') ORDER BY start_date DESC LIMIT 1`).get(p.id);
+        const refDateStr = lastLeave ? (lastLeave.end_date || lastLeave.start_date) : (p.unit_joining_date || `${now.getFullYear()}-01-01`);
         if (refDateStr) {
           try {
             const refDate = parseISO(refDateStr);
@@ -561,8 +563,8 @@ reportsRouter.get('/generate', authenticateUser, (req, res) => {
       const overdueList: any[] = [];
 
       allActivePersonnel.forEach((p: any) => {
-        const lastCLeave: any = db.prepare(`SELECT * FROM leave_records WHERE personnel_id = ? AND leave_type = 'C_LEAVE' ORDER BY start_date DESC LIMIT 1`).get(p.id);
-        const refDateStr = lastCLeave ? (lastCLeave.end_date || lastCLeave.start_date) : `${now.getFullYear()}-01-01`;
+        const lastLeave: any = db.prepare(`SELECT * FROM leave_records WHERE personnel_id = ? AND leave_type IN ('P_LEAVE', 'C_LEAVE') ORDER BY start_date DESC LIMIT 1`).get(p.id);
+        const refDateStr = lastLeave ? (lastLeave.end_date || lastLeave.start_date) : (p.unit_joining_date || `${now.getFullYear()}-01-01`);
         if (refDateStr) {
           try {
             const refDate = parseISO(refDateStr);
@@ -593,8 +595,8 @@ reportsRouter.get('/generate', authenticateUser, (req, res) => {
       const forecast: any[] = [];
 
       allActivePersonnel.forEach((p: any) => {
-        const lastCLeave: any = db.prepare(`SELECT * FROM leave_records WHERE personnel_id = ? AND leave_type = 'C_LEAVE' ORDER BY start_date DESC LIMIT 1`).get(p.id);
-        const refDateStr = lastCLeave ? (lastCLeave.end_date || lastCLeave.start_date) : `${now.getFullYear()}-01-01`;
+        const lastLeave: any = db.prepare(`SELECT * FROM leave_records WHERE personnel_id = ? AND leave_type IN ('P_LEAVE', 'C_LEAVE') ORDER BY start_date DESC LIMIT 1`).get(p.id);
+        const refDateStr = lastLeave ? (lastLeave.end_date || lastLeave.start_date) : (p.unit_joining_date || `${now.getFullYear()}-01-01`);
         if (refDateStr) {
           try {
             const refDate = parseISO(refDateStr);
