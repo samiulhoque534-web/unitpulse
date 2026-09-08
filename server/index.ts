@@ -81,6 +81,8 @@ async function startServer() {
   } catch (e) {
     console.log('[UnitPulse] Seeding fresh database...');
     await seedDatabase();
+  }
+
   // Synchronize leave status with personnel database
   console.log('[UnitPulse] Synchronizing leave records with personnel database...');
   syncLeaveStatusWithPersonnel();
