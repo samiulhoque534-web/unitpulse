@@ -45,15 +45,15 @@ export const Modal: React.FC<ModalProps> = ({
   }[maxWidth];
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-fade-in">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-6 animate-fade-in">
       <div
-        className={`relative w-full ${maxWidthClass} bg-tactical-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]`}
+        className={`relative w-full ${maxWidthClass} bg-tactical-900 border border-slate-700/80 rounded-xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] sm:max-h-[90vh]`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-tactical-950/60">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-800 bg-tactical-950/60">
           <div>
-            <h3 className="text-lg font-bold text-white tracking-wide flex items-center gap-2">
+            <h3 className="text-base sm:text-lg font-bold text-white tracking-wide flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-army-500 inline-block"></span>
               {title}
             </h3>
@@ -68,7 +68,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-6 overflow-y-auto flex-1">{children}</div>
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>
   );

@@ -91,6 +91,8 @@ export async function initDatabase() {
       shift_name TEXT,
       kote_cycle TEXT,
       kote_group INTEGER,
+      start_date_time TEXT,
+      end_date_time TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       created_by TEXT,
@@ -184,6 +186,29 @@ export async function initDatabase() {
   } catch (e) {}
   try {
     rawDb.exec('ALTER TABLE personnel ADD COLUMN previous_status TEXT;');
+  } catch (e) {}
+  try {
+    rawDb.exec('ALTER TABLE duties ADD COLUMN start_date_time TEXT;');
+  } catch (e) {}
+  try {
+    rawDb.exec('ALTER TABLE duties ADD COLUMN end_date_time TEXT;');
+  } catch (e) {}
+  try {
+    rawDb.exec('CREATE INDEX IF NOT EXISTS idx_duties_start_dt ON duties(start_date_time);');
+    rawDb.exec('CREATE INDEX IF NOT EXISTS idx_duties_end_dt ON duties(end_date_time);');
+  } catch (e) {}
+
+  // Backfill start_date_time and end_date_time for any legacy records
+  try {
+    rawDb.exec(`
+      UPDATE duties
+      SET start_date_time = date || 'T' || start_time || ':00',
+          end_date_time = CASE
+            WHEN end_time <= start_time THEN date(date, '+1 day') || 'T' || end_time || ':00'
+            ELSE date || 'T' || end_time || ':00'
+          END
+      WHERE start_date_time IS NULL OR end_date_time IS NULL;
+    `);
   } catch (e) {}
 
   saveDatabase();

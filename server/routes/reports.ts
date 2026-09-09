@@ -120,25 +120,37 @@ reportsRouter.get('/generate', authenticateUser, (req, res) => {
 
     case '2_DAILY_DUTY': {
       reportTitle = 'DAILY DUTY DETAIL ROSTER';
+      const dateStart = `${reportDate}T00:00:00`;
+      const dateEnd = `${reportDate}T23:59:59`;
       let query = `
         SELECT d.*, p.army_number, p.rank, p.name, p.trade
         FROM duties d
         JOIN personnel p ON d.personnel_id = p.id
-        WHERE d.date = ?
+        WHERE (
+          COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') <= ?
+          AND
+          COALESCE(d.end_date_time, CASE WHEN d.end_time <= d.start_time THEN date(d.date, '+1 day') || 'T' || d.end_time || ':00' ELSE d.date || 'T' || d.end_time || ':00' END) >= ?
+        )
       `;
-      const params: any[] = [reportDate];
+      const params: any[] = [dateEnd, dateStart];
       if (dutyTypeFilter) {
         query += ' AND d.duty_type = ?';
         params.push(dutyTypeFilter);
       }
-      query += ' ORDER BY d.start_time ASC';
+      query += ' ORDER BY COALESCE(d.start_date_time, d.date || "T" || d.start_time || ":00") ASC';
 
       const duties = db.prepare(query).all(...params);
       data = {
-        duties: duties.map((d: any) => ({
-          ...d,
-          activeStatus: computeDutyActiveStatus(d.date, d.start_time, d.end_time),
-        })),
+        duties: duties.map((d: any) => {
+          const sdt = d.start_date_time || `${d.date}T${d.start_time}:00`;
+          const edt = d.end_date_time || (d.end_time <= d.start_time ? `${format(addDays(parseISO(d.date), 1), 'yyyy-MM-dd')}T${d.end_time}:00` : `${d.date}T${d.end_time}:00`);
+          return {
+            ...d,
+            startDateTime: sdt,
+            endDateTime: edt,
+            activeStatus: computeDutyActiveStatus(sdt, edt),
+          };
+        }),
         totalDuties: duties.length,
       };
       break;

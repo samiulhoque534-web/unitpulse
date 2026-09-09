@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Modal } from '../common/Modal';
 import { DutyType, DutyRole, Personnel } from '../../types';
 import { DUTY_TYPES, DUTY_ROLES, UNIT_NAME } from '../../utils/constants';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { format } from 'date-fns';
-import { AlertTriangle, Clock, Shield } from 'lucide-react';
+import { format, addDays, parseISO } from 'date-fns';
+import { AlertTriangle, Clock, Shield, Moon } from 'lucide-react';
+import { PersonnelSearchSelect } from '../common/PersonnelSearchSelect';
 
 interface DutyFormModalProps {
   isOpen: boolean;
@@ -139,16 +140,44 @@ export const DutyFormModal: React.FC<DutyFormModalProps> = ({
     }
   };
 
+  const crossesMidnight = useMemo(() => {
+    if (!formData.startTime || !formData.endTime) return false;
+    const [sH, sM] = formData.startTime.split(':').map(Number);
+    const [eH, eM] = formData.endTime.split(':').map(Number);
+    return (eH * 60 + eM) <= (sH * 60 + sM);
+  }, [formData.startTime, formData.endTime]);
+
+  const endDatePreview = useMemo(() => {
+    if (!crossesMidnight || !formData.date) return null;
+    try {
+      return format(addDays(parseISO(formData.date), 1), 'dd MMM yyyy');
+    } catch (e) {
+      return null;
+    }
+  }, [crossesMidnight, formData.date]);
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title="Assign Regimental Duty Detail"
-      subtitle={`${UNIT_NAME} — Kote (1 GC + 1 Guard), RP Variable, and Special Appointments`}
+      subtitle={`${UNIT_NAME} — Regimental Duties, Kote, RP & Special Appointments`}
       maxWidth="2xl"
     >
       <form onSubmit={handleSubmit} className="space-y-4 text-xs">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Soldier Selection - Searchable Combobox */}
+          <div className="sm:col-span-2">
+            <PersonnelSearchSelect
+              personnelList={personnelList}
+              selectedPersonnelId={formData.personnelId}
+              onSelect={(soldier) => setFormData((prev) => ({ ...prev, personnelId: soldier ? soldier.id : '' }))}
+              label="Select Soldier"
+              required
+              placeholder="Type Army No, Name, Rank, or Trade to search..."
+            />
+          </div>
+
           {/* Date */}
           <div>
             <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
@@ -161,24 +190,6 @@ export const DutyFormModal: React.FC<DutyFormModalProps> = ({
               onChange={(e) => setFormData({ ...formData, date: e.target.value })}
               className="w-full px-3 py-2 rounded-xl bg-tactical-950 border border-slate-700 text-white font-mono"
             />
-          </div>
-
-          {/* Soldier Selection */}
-          <div>
-            <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
-              Select Soldier *
-            </label>
-            <select
-              value={formData.personnelId}
-              onChange={(e) => setFormData({ ...formData, personnelId: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl bg-tactical-950 border border-slate-700 text-white font-semibold"
-            >
-              {personnelList.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.rank} {p.name} ({p.armyNumber}) - {p.trade}
-                </option>
-              ))}
-            </select>
           </div>
 
           {/* Duty Type */}
@@ -277,6 +288,20 @@ export const DutyFormModal: React.FC<DutyFormModalProps> = ({
           </div>
         </div>
 
+        {/* Midnight Crossing Indicator */}
+        {crossesMidnight && (
+          <div className="flex items-center gap-2.5 p-3 rounded-xl bg-purple-950/50 border border-purple-500/40 text-purple-200 text-xs font-mono animate-fade-in shadow-inner">
+            <Moon className="w-4 h-4 text-purple-400 flex-shrink-0" />
+            <div>
+              <span className="font-bold text-purple-300">Overnight Duty Detected: </span>
+              Ends on next calendar day (<strong>{endDatePreview}</strong> at {formData.endTime}).
+              <span className="block text-[10px] text-purple-400 font-sans mt-0.5">
+                Will appear in both {formData.date} and {endDatePreview} roster views automatically without duplicating database records.
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Remarks */}
         <div>
           <label className="block text-slate-300 font-bold uppercase tracking-wider mb-1">
@@ -292,18 +317,18 @@ export const DutyFormModal: React.FC<DutyFormModalProps> = ({
         </div>
 
         {/* Buttons */}
-        <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-3 border-t border-slate-800">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-tactical-800 text-slate-300 font-bold"
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-tactical-800 hover:bg-tactical-700 text-slate-300 font-bold transition-colors min-h-[44px]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-5 py-2 rounded-xl bg-army-600 hover:bg-army-500 text-white font-bold disabled:opacity-50 shadow-lg"
+            className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-army-600 hover:bg-army-500 text-white font-bold disabled:opacity-50 shadow-lg transition-colors min-h-[44px]"
           >
             {isSubmitting ? 'Assigning...' : 'Assign Duty'}
           </button>

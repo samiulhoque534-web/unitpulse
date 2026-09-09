@@ -105,6 +105,8 @@ export interface DutyRecord {
   location: string;
   startTime: string;
   endTime: string;
+  startDateTime?: string;
+  endDateTime?: string;
   durationHours: number;
   isNightDuty: boolean;
   nightDutyHours: number;

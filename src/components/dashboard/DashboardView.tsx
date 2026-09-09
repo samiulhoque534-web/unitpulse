@@ -52,8 +52,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [leaveReminders, setLeaveReminders] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const fetchDashboard = async () => {
-    setIsLoading(true);
+  const fetchDashboard = async (isBackground = false) => {
+    if (!isBackground) setIsLoading(true);
     try {
       const [mRes, onDutyRes, dRes, ptRes, gmRes, lRemRes] = await Promise.all([
         api.getManpowerDashboard(),
@@ -73,13 +73,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     } catch (e) {
       console.error('Failed to load dashboard data:', e);
     } finally {
-      setIsLoading(false);
+      if (!isBackground) setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboard();
-    const interval = setInterval(fetchDashboard, 30000);
+    fetchDashboard(false);
+    const interval = setInterval(() => {
+      fetchDashboard(true);
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
 

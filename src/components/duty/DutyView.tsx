@@ -55,8 +55,8 @@ export const DutyView: React.FC = () => {
   const [showRpModal, setShowRpModal] = useState(false);
   const [selectedAssignDate, setSelectedAssignDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
-  const fetchDuties = async () => {
-    setIsLoading(true);
+  const fetchDuties = async (isBackground = false) => {
+    if (!isBackground) setIsLoading(true);
     try {
       const todayStr = format(new Date(), 'yyyy-MM-dd');
       const [dRes, onDutyRes, koteRes] = await Promise.all([
@@ -75,13 +75,16 @@ export const DutyView: React.FC = () => {
     } catch (e: any) {
       console.error(e);
     } finally {
-      setIsLoading(false);
+      if (!isBackground) setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDuties();
-    const interval = setInterval(fetchDuties, 30000);
+    fetchDuties(false);
+    // Background polling: silently update in-place every 30s without resetting loading state or closing modals
+    const interval = setInterval(() => {
+      fetchDuties(true);
+    }, 30000);
     return () => clearInterval(interval);
   }, [startDate, endDate, selectedDutyType, search]);
 
@@ -404,8 +407,8 @@ export const DutyView: React.FC = () => {
             </div>
           </div>
 
-          {/* Table Roster */}
-          <div className="rounded-2xl bg-tactical-900 border border-slate-800 overflow-hidden shadow-tactical">
+          {/* Desktop Table View (Hidden on mobile) */}
+          <div className="hidden md:block rounded-2xl bg-tactical-900 border border-slate-800 overflow-hidden shadow-tactical">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead className="bg-tactical-950 border-b border-slate-800 text-slate-400 uppercase text-[10px] font-bold">
@@ -438,68 +441,177 @@ export const DutyView: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    duties.map((d) => (
-                      <tr key={d.id} className="hover:bg-tactical-800/40">
-                        <td className="p-3.5 font-mono font-bold text-white whitespace-nowrap">{d.date}</td>
-                        <td className="p-3.5">
-                          <DutyTypeBadge type={d.dutyType} />
-                        </td>
-                        <td className="p-3.5 font-mono text-amber-300 font-bold whitespace-nowrap">
-                          {d.dutyRole || d.dutyType}
-                        </td>
-                        <td className="p-3.5 font-mono text-slate-400 text-[11px] whitespace-nowrap">
-                          {d.shiftName || 'General'}
-                        </td>
-                        <td className="p-3.5">
-                          <div className="flex items-center space-x-1.5 whitespace-nowrap">
-                            <RankBadge rank={d.rank || 'Sainik'} />
-                            <strong className="text-white">{d.name}</strong>
-                            <span className="text-slate-400 font-mono">({d.armyNumber})</span>
-                            {d.currentStatus && d.currentStatus !== 'PRESENT' && (
-                              <span className="text-[10px] text-rose-400 font-mono">[{d.currentStatus}]</span>
+                    duties.map((d) => {
+                      const isCrossMidnight = d.startDateTime && d.endDateTime && d.startDateTime.split('T')[0] !== d.endDateTime.split('T')[0];
+                      return (
+                        <tr key={d.id} className="hover:bg-tactical-800/40">
+                          <td className="p-3.5 font-mono font-bold text-white whitespace-nowrap">{d.date}</td>
+                          <td className="p-3.5">
+                            <DutyTypeBadge type={d.dutyType} />
+                          </td>
+                          <td className="p-3.5 font-mono text-amber-300 font-bold whitespace-nowrap">
+                            {d.dutyRole || d.dutyType}
+                          </td>
+                          <td className="p-3.5 font-mono text-slate-400 text-[11px] whitespace-nowrap">
+                            {d.shiftName || 'General'}
+                          </td>
+                          <td className="p-3.5">
+                            <div className="flex items-center space-x-1.5 whitespace-nowrap">
+                              <RankBadge rank={d.rank || 'Sainik'} />
+                              <strong className="text-white">{d.name}</strong>
+                              <span className="text-slate-400 font-mono">({d.armyNumber})</span>
+                              {d.currentStatus && d.currentStatus !== 'PRESENT' && (
+                                <span className="text-[10px] text-rose-400 font-mono">[{d.currentStatus}]</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3.5 text-slate-300">{d.location}</td>
+                          <td className="p-3.5 font-mono text-slate-300 whitespace-nowrap">
+                            <span>{d.startTime} - {d.endTime}</span>
+                            {isCrossMidnight && (
+                              <span className="ml-1.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-950 text-purple-300 border border-purple-500/30">
+                                +1d
+                              </span>
                             )}
-                          </div>
-                        </td>
-                        <td className="p-3.5 text-slate-300">{d.location}</td>
-                        <td className="p-3.5 font-mono text-slate-300 whitespace-nowrap">{d.startTime} - {d.endTime}</td>
-                        <td className="p-3.5 font-mono font-bold text-center text-white">{d.durationHours}h</td>
-                        <td className="p-3.5 text-center">
-                          {d.isNightDuty ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center justify-center gap-1 mx-auto w-max">
-                              <Moon className="w-3 h-3" />
-                              <span>{d.nightDutyHours}h</span>
+                          </td>
+                          <td className="p-3.5 font-mono font-bold text-center text-white">{d.durationHours}h</td>
+                          <td className="p-3.5 text-center">
+                            {d.isNightDuty ? (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30 flex items-center justify-center gap-1 mx-auto w-max">
+                                <Moon className="w-3 h-3" />
+                                <span>{d.nightDutyHours}h</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 font-mono">-</span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
+                              d.activeStatus === 'ON_DUTY'
+                                ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse'
+                                : d.activeStatus === 'UPCOMING'
+                                ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                : 'bg-tactical-800 text-slate-400 border-slate-700'
+                            }`}>
+                              {d.activeStatus}
                             </span>
-                          ) : (
-                            <span className="text-slate-500 font-mono">-</span>
-                          )}
-                        </td>
-                        <td className="p-3.5">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
-                            d.activeStatus === 'ON_DUTY'
-                              ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse'
-                              : d.activeStatus === 'UPCOMING'
-                              ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                              : 'bg-tactical-800 text-slate-400 border-slate-700'
-                          }`}>
-                            {d.activeStatus}
-                          </span>
-                        </td>
-                        <td className="p-3.5 text-right">
-                          {canModify() && hasAppointment(['2IC', 'DUTY_OFFICER', 'DUTY_MUNSHI']) && (
-                            <button
-                              onClick={() => handleDeleteDuty(d.id, d.date, d.name || '')}
-                              className="p-1.5 rounded-lg bg-tactical-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))
+                          </td>
+                          <td className="p-3.5 text-right">
+                            {canModify() && hasAppointment(['2IC', 'DUTY_OFFICER', 'DUTY_MUNSHI']) && (
+                              <button
+                                onClick={() => handleDeleteDuty(d.id, d.date, d.name || '')}
+                                className="p-1.5 rounded-lg bg-tactical-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
+          </div>
+
+          {/* Mobile Duty Cards (Visible only on < md screens) */}
+          <div className="block md:hidden space-y-3">
+            {isLoading ? (
+              <div className="p-8 text-center text-slate-500 rounded-2xl bg-tactical-900 border border-slate-800">
+                <RefreshCw className="w-5 h-5 animate-spin mx-auto text-army-400 mb-2" />
+                <span>Loading duty roster...</span>
+              </div>
+            ) : duties.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 rounded-2xl bg-tactical-900 border border-slate-800">
+                No duty details found for this date range.
+              </div>
+            ) : (
+              duties.map((d) => {
+                const isCrossMidnight = d.startDateTime && d.endDateTime && d.startDateTime.split('T')[0] !== d.endDateTime.split('T')[0];
+                return (
+                  <div
+                    key={d.id}
+                    className="p-3.5 rounded-2xl bg-tactical-900 border border-slate-800 space-y-3 shadow-md"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <DutyTypeBadge type={d.dutyType} />
+                        <span className="text-amber-300 font-bold font-mono text-[11px]">
+                          {d.dutyRole || d.dutyType}
+                        </span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
+                        d.activeStatus === 'ON_DUTY'
+                          ? 'bg-red-500/20 text-red-300 border-red-500/40 animate-pulse'
+                          : d.activeStatus === 'UPCOMING'
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                          : 'bg-tactical-800 text-slate-400 border-slate-700'
+                      }`}>
+                        {d.activeStatus}
+                      </span>
+                    </div>
+
+                    {/* Soldier Info */}
+                    <div className="flex items-center justify-between gap-2 p-2 rounded-xl bg-tactical-950 border border-slate-800">
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <RankBadge rank={d.rank || 'Sainik'} />
+                        <div className="min-w-0">
+                          <div className="text-white font-bold text-xs truncate">{d.name}</div>
+                          <div className="text-slate-400 font-mono text-[10px] truncate">
+                            No: <span className="text-amber-300 font-bold">{d.armyNumber}</span> • {d.trade}
+                          </div>
+                        </div>
+                      </div>
+                      {d.currentStatus && d.currentStatus !== 'PRESENT' && (
+                        <span className="text-[10px] text-rose-400 font-mono bg-rose-950/40 px-1.5 py-0.5 rounded border border-rose-500/30 flex-shrink-0">
+                          {d.currentStatus}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Timing & Location */}
+                    <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                      <div className="p-2 rounded-lg bg-tactical-950 border border-slate-800/80">
+                        <span className="text-[9px] text-slate-500 block uppercase">Timings</span>
+                        <div className="text-white font-bold flex items-center gap-1 mt-0.5">
+                          <Clock className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                          <span>{d.startTime} - {d.endTime}</span>
+                        </div>
+                        {isCrossMidnight && (
+                          <span className="text-[9px] text-purple-300 block font-sans mt-0.5 font-bold">
+                            Overnight (+1 Day)
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="p-2 rounded-lg bg-tactical-950 border border-slate-800/80">
+                        <span className="text-[9px] text-slate-500 block uppercase">Hours & Night</span>
+                        <div className="text-white font-bold mt-0.5">
+                          {d.durationHours}h {d.isNightDuty ? `• ${d.nightDutyHours}h Night` : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Location & Delete Action */}
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-800/60">
+                      <span className="text-slate-400 truncate text-[11px]">
+                        📍 {d.location} {d.shiftName ? `• ${d.shiftName}` : ''}
+                      </span>
+                      {canModify() && hasAppointment(['2IC', 'DUTY_OFFICER', 'DUTY_MUNSHI']) && (
+                        <button
+                          onClick={() => handleDeleteDuty(d.id, d.date, d.name || '')}
+                          className="px-2.5 py-1.5 rounded-lg bg-rose-950/30 hover:bg-rose-900/50 text-rose-400 border border-rose-500/30 text-[11px] font-bold flex items-center gap-1 transition-colors min-h-[36px]"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Delete</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}

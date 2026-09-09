@@ -66,33 +66,49 @@ function isTimeOverlap(s1: string, e1: string, s2: string, e2: string): boolean 
   return Math.max(start1, start2) < Math.min(end1, end2);
 }
 
-// Helper: Compute automatic Active Status against live clock
-export function computeDutyActiveStatus(dutyDate: string, startTime: string, endTime: string): 'UPCOMING' | 'ON_DUTY' | 'COMPLETED' {
-  const now = new Date();
-  const todayStr = format(now, 'yyyy-MM-dd');
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-  if (dutyDate > todayStr) return 'UPCOMING';
-  if (dutyDate < todayStr) return 'COMPLETED';
-
+// Helper: Compute Start and End DateTime ISO strings
+export function computeStartEndDateTime(date: string, startTime: string, endTime: string): { startDateTime: string; endDateTime: string } {
+  const startDateTime = `${date}T${startTime}:00`;
   const [sH, sM] = startTime.split(':').map(Number);
-  let [eH, eM] = endTime.split(':').map(Number);
-  let startMin = sH * 60 + sM;
-  let endMin = eH * 60 + eM;
+  const [eH, eM] = endTime.split(':').map(Number);
+  const startMin = sH * 60 + sM;
+  const endMin = eH * 60 + eM;
 
+  let endDate = date;
   if (endMin <= startMin) {
-    if (currentMinutes >= startMin || currentMinutes < eH * 60 + eM) {
-      return 'ON_DUTY';
-    }
-    if (currentMinutes < startMin && currentMinutes >= eH * 60 + eM) {
-      return 'UPCOMING';
-    }
-    return 'COMPLETED';
-  } else {
-    if (currentMinutes < startMin) return 'UPCOMING';
-    if (currentMinutes >= startMin && currentMinutes < endMin) return 'ON_DUTY';
-    return 'COMPLETED';
+    endDate = format(addDays(parseISO(date), 1), 'yyyy-MM-dd');
   }
+
+  const endDateTime = `${endDate}T${endTime}:00`;
+  return { startDateTime, endDateTime };
+}
+
+// Helper: Compute automatic Active Status against live clock
+export function computeDutyActiveStatus(
+  dateOrStart: string,
+  startTimeOrEnd?: string,
+  maybeEndTime?: string
+): 'UPCOMING' | 'ON_DUTY' | 'COMPLETED' {
+  const now = new Date();
+  const nowIso = format(now, "yyyy-MM-dd'T'HH:mm:ss");
+
+  let startIso: string;
+  let endIso: string;
+
+  if (dateOrStart && dateOrStart.includes('T') && startTimeOrEnd && startTimeOrEnd.includes('T')) {
+    startIso = dateOrStart;
+    endIso = startTimeOrEnd;
+  } else {
+    const sTime = startTimeOrEnd || '00:00';
+    const eTime = maybeEndTime || '23:59';
+    const comp = computeStartEndDateTime(dateOrStart, sTime, eTime);
+    startIso = comp.startDateTime;
+    endIso = comp.endDateTime;
+  }
+
+  if (nowIso < startIso) return 'UPCOMING';
+  if (nowIso >= startIso && nowIso < endIso) return 'ON_DUTY';
+  return 'COMPLETED';
 }
 
 // 1. Get Duty Roster
@@ -108,11 +124,23 @@ dutyRouter.get('/roster', authenticateUser, (req, res) => {
   const params: any[] = [];
 
   if (date) {
-    query += ' AND d.date = ?';
-    params.push(date);
+    const dateStart = `${date}T00:00:00`;
+    const dateEnd = `${date}T23:59:59`;
+    query += ` AND (
+      COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') <= ?
+      AND
+      COALESCE(d.end_date_time, CASE WHEN d.end_time <= d.start_time THEN date(d.date, '+1 day') || 'T' || d.end_time || ':00' ELSE d.date || 'T' || d.end_time || ':00' END) >= ?
+    )`;
+    params.push(dateEnd, dateStart);
   } else if (startDate && endDate) {
-    query += ' AND d.date >= ? AND d.date <= ?';
-    params.push(startDate, endDate);
+    const rangeStart = `${startDate}T00:00:00`;
+    const rangeEnd = `${endDate}T23:59:59`;
+    query += ` AND (
+      COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') <= ?
+      AND
+      COALESCE(d.end_date_time, CASE WHEN d.end_time <= d.start_time THEN date(d.date, '+1 day') || 'T' || d.end_time || ':00' ELSE d.date || 'T' || d.end_time || ':00' END) >= ?
+    )`;
+    params.push(rangeEnd, rangeStart);
   }
 
   if (dutyType) {
@@ -135,31 +163,38 @@ dutyRouter.get('/roster', authenticateUser, (req, res) => {
 
   const rows = db.prepare(query).all(...params);
 
-  const duties = rows.map((r: any) => ({
-    id: r.id,
-    date: r.date,
-    personnelId: r.personnel_id,
-    dutyType: r.duty_type,
-    dutyRole: r.duty_role || (r.duty_type === 'Kote Duty' || r.duty_type === 'RP Duty' ? 'Guard' : r.duty_type),
-    shiftName: r.shift_name || 'General',
-    koteCycle: r.kote_cycle,
-    koteGroup: r.kote_group,
-    location: r.location,
-    startTime: r.start_time,
-    endTime: r.end_time,
-    durationHours: r.duration_hours,
-    isNightDuty: Boolean(r.is_night_duty),
-    nightDutyHours: r.night_duty_hours,
-    remarks: r.remarks,
-    activeStatus: computeDutyActiveStatus(r.date, r.start_time, r.end_time),
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-    armyNumber: r.army_number,
-    rank: r.rank,
-    name: r.name,
-    trade: r.trade,
-    currentStatus: r.current_status,
-  }));
+  const duties = rows.map((r: any) => {
+    const startDateTime = r.start_date_time || `${r.date}T${r.start_time}:00`;
+    const endDateTime = r.end_date_time || (r.end_time <= r.start_time ? `${format(addDays(parseISO(r.date), 1), 'yyyy-MM-dd')}T${r.end_time}:00` : `${r.date}T${r.end_time}:00`);
+
+    return {
+      id: r.id,
+      date: r.date,
+      personnelId: r.personnel_id,
+      dutyType: r.duty_type,
+      dutyRole: r.duty_role || (r.duty_type === 'Kote Duty' || r.duty_type === 'RP Duty' ? 'Guard' : r.duty_type),
+      shiftName: r.shift_name || 'General',
+      koteCycle: r.kote_cycle,
+      koteGroup: r.kote_group,
+      location: r.location,
+      startTime: r.start_time,
+      endTime: r.end_time,
+      startDateTime,
+      endDateTime,
+      durationHours: r.duration_hours,
+      isNightDuty: Boolean(r.is_night_duty),
+      nightDutyHours: r.night_duty_hours,
+      remarks: r.remarks,
+      activeStatus: computeDutyActiveStatus(startDateTime, endDateTime),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      armyNumber: r.army_number,
+      rank: r.rank,
+      name: r.name,
+      trade: r.trade,
+      currentStatus: r.current_status,
+    };
+  });
 
   return res.json({ duties });
 });
@@ -269,13 +304,19 @@ dutyRouter.post('/kote-cycle', authenticateUser, requirePermission(['2IC', 'DUTY
     const periods = scheduleMap[cycle]?.[grp.groupNum] || scheduleMap[cycle][1];
 
     periods.forEach((p, pIdx) => {
+      let segStartDate = date;
+      if (cycle === 'NIGHT_18_06' && p.start < '12:00') {
+        segStartDate = format(addDays(parseISO(date), 1), 'yyyy-MM-dd');
+      }
+      const { startDateTime, endDateTime } = computeStartEndDateTime(segStartDate, p.start, p.end);
+
       // Guard Commander Record
       db.prepare(`
-        INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, kote_cycle, kote_group, location, start_time, end_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
-        VALUES (?, ?, ?, 'Kote Duty', 'Guard Commander', ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?)
+        INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, kote_cycle, kote_group, location, start_time, end_time, start_date_time, end_date_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
+        VALUES (?, ?, ?, 'Kote Duty', 'Guard Commander', ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?)
       `).run(
         `kote_${Date.now()}_g${grp.groupNum}_gc_${pIdx}_${Math.random().toString(36).substr(2, 3)}`,
-        date,
+        segStartDate,
         gc.id,
         shiftLabel,
         cycle,
@@ -283,6 +324,8 @@ dutyRouter.post('/kote-cycle', authenticateUser, requirePermission(['2IC', 'DUTY
         loc,
         p.start,
         p.end,
+        startDateTime,
+        endDateTime,
         p.night,
         p.nightHrs,
         `Kote Group ${grp.groupNum} (${p.start}-${p.end})`,
@@ -294,11 +337,11 @@ dutyRouter.post('/kote-cycle', authenticateUser, requirePermission(['2IC', 'DUTY
 
       // Guard Record
       db.prepare(`
-        INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, kote_cycle, kote_group, location, start_time, end_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
-        VALUES (?, ?, ?, 'Kote Duty', 'Guard', ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?)
+        INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, kote_cycle, kote_group, location, start_time, end_time, start_date_time, end_date_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
+        VALUES (?, ?, ?, 'Kote Duty', 'Guard', ?, ?, ?, ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?)
       `).run(
         `kote_${Date.now()}_g${grp.groupNum}_gd_${pIdx}_${Math.random().toString(36).substr(2, 3)}`,
-        date,
+        segStartDate,
         gd.id,
         shiftLabel,
         cycle,
@@ -306,6 +349,8 @@ dutyRouter.post('/kote-cycle', authenticateUser, requirePermission(['2IC', 'DUTY
         loc,
         p.start,
         p.end,
+        startDateTime,
+        endDateTime,
         p.night,
         p.nightHrs,
         `Kote Group ${grp.groupNum} (${p.start}-${p.end})`,
@@ -448,6 +493,8 @@ dutyRouter.post('/rp-timeline', authenticateUser, requirePermission(['2IC', 'DUT
     const durationHours = calculateDurationHours(startTime, endTime);
     const { isNightDuty, nightDutyHours } = calculateNightDuty(startTime, endTime);
 
+    const { startDateTime, endDateTime } = computeStartEndDateTime(date, startTime, endTime);
+
     // Assign Guard Commanders
     if (Array.isArray(slot.guardCommanders)) {
       slot.guardCommanders.forEach((pId: string, idx: number) => {
@@ -459,9 +506,9 @@ dutyRouter.post('/rp-timeline', authenticateUser, requirePermission(['2IC', 'DUT
           }
           const id = `rp_${Date.now()}_gc_${slotIdx}_${idx}`;
           db.prepare(`
-            INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
-            VALUES (?, ?, ?, 'RP Duty', 'Guard Commander', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(id, date, p.id, `RP ${startTime}-${endTime}`, location, startTime, endTime, durationHours, isNightDuty ? 1 : 0, nightDutyHours, remarks, now, now, createdBy);
+            INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, start_date_time, end_date_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
+            VALUES (?, ?, ?, 'RP Duty', 'Guard Commander', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(id, date, p.id, `RP ${startTime}-${endTime}`, location, startTime, endTime, startDateTime, endDateTime, durationHours, isNightDuty ? 1 : 0, nightDutyHours, remarks, now, now, createdBy);
           createdCount++;
         }
       });
@@ -478,9 +525,9 @@ dutyRouter.post('/rp-timeline', authenticateUser, requirePermission(['2IC', 'DUT
           }
           const id = `rp_${Date.now()}_gd_${slotIdx}_${idx}`;
           db.prepare(`
-            INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
-            VALUES (?, ?, ?, 'RP Duty', 'Guard', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(id, date, p.id, `RP ${startTime}-${endTime}`, location, startTime, endTime, durationHours, isNightDuty ? 1 : 0, nightDutyHours, remarks, now, now, createdBy);
+            INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, start_date_time, end_date_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
+            VALUES (?, ?, ?, 'RP Duty', 'Guard', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(id, date, p.id, `RP ${startTime}-${endTime}`, location, startTime, endTime, startDateTime, endDateTime, durationHours, isNightDuty ? 1 : 0, nightDutyHours, remarks, now, now, createdBy);
           createdCount++;
         }
       });
@@ -514,62 +561,23 @@ dutyRouter.get('/upcoming', authenticateUser, (req, res) => {
     maxDate = format(addDays(now, 30), 'yyyy-MM-dd');
   }
 
-  const rows = db.prepare(`
-    SELECT d.*, p.army_number, p.rank, p.name, p.trade, p.current_status
-    FROM duties d
-    JOIN personnel p ON d.personnel_id = p.id
-    WHERE d.date >= ? AND d.date <= ?
-    ORDER BY d.date ASC, d.start_time ASC
-  `).all(minDate, maxDate);
-
-  const upcomingDuties = rows.map((r: any) => ({
-    id: r.id,
-    date: r.date,
-    personnelId: r.personnel_id,
-    dutyType: r.duty_type,
-    dutyRole: r.duty_role || (r.duty_type === 'Kote Duty' || r.duty_type === 'RP Duty' ? 'Guard' : r.duty_type),
-    shiftName: r.shift_name || 'General',
-    koteCycle: r.kote_cycle,
-    koteGroup: r.kote_group,
-    location: r.location,
-    startTime: r.start_time,
-    endTime: r.end_time,
-    durationHours: r.duration_hours,
-    isNightDuty: Boolean(r.is_night_duty),
-    nightDutyHours: r.night_duty_hours,
-    remarks: r.remarks,
-    activeStatus: computeDutyActiveStatus(r.date, r.start_time, r.end_time),
-    armyNumber: r.army_number,
-    rank: r.rank,
-    name: r.name,
-    trade: r.trade,
-    currentStatus: r.current_status,
-  }));
-
-  return res.json({ upcomingDuties, filter, total: upcomingDuties.length });
-});
-
-// 6. Get Monthly Calendar
-dutyRouter.get('/calendar', authenticateUser, (req, res) => {
-  const monthParam = (req.query.month as string) || format(new Date(), 'yyyy-MM');
-
-  const startDate = `${monthParam}-01`;
-  const endDate = `${monthParam}-31`;
+  const minIso = `${minDate}T00:00:00`;
+  const maxIso = `${maxDate}T23:59:59`;
 
   const rows = db.prepare(`
     SELECT d.*, p.army_number, p.rank, p.name, p.trade, p.current_status
     FROM duties d
     JOIN personnel p ON d.personnel_id = p.id
-    WHERE d.date >= ? AND d.date <= ?
-    ORDER BY d.date ASC, d.start_time ASC
-  `).all(startDate, endDate);
+    WHERE COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') <= ?
+      AND COALESCE(d.end_date_time, CASE WHEN d.end_time <= d.start_time THEN date(d.date, '+1 day') || 'T' || d.end_time || ':00' ELSE d.date || 'T' || d.end_time || ':00' END) >= ?
+    ORDER BY COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') ASC
+  `).all(maxIso, minIso);
 
-  const dateMap: Record<string, any[]> = {};
-  rows.forEach((r: any) => {
-    if (!dateMap[r.date]) {
-      dateMap[r.date] = [];
-    }
-    dateMap[r.date].push({
+  const upcomingDuties = rows.map((r: any) => {
+    const startDateTime = r.start_date_time || `${r.date}T${r.start_time}:00`;
+    const endDateTime = r.end_date_time || (r.end_time <= r.start_time ? `${format(addDays(parseISO(r.date), 1), 'yyyy-MM-dd')}T${r.end_time}:00` : `${r.date}T${r.end_time}:00`);
+
+    return {
       id: r.id,
       date: r.date,
       personnelId: r.personnel_id,
@@ -581,16 +589,81 @@ dutyRouter.get('/calendar', authenticateUser, (req, res) => {
       location: r.location,
       startTime: r.start_time,
       endTime: r.end_time,
+      startDateTime,
+      endDateTime,
       durationHours: r.duration_hours,
       isNightDuty: Boolean(r.is_night_duty),
       nightDutyHours: r.night_duty_hours,
-      activeStatus: computeDutyActiveStatus(r.date, r.start_time, r.end_time),
+      remarks: r.remarks,
+      activeStatus: computeDutyActiveStatus(startDateTime, endDateTime),
       armyNumber: r.army_number,
       rank: r.rank,
       name: r.name,
       trade: r.trade,
       currentStatus: r.current_status,
-    });
+    };
+  });
+
+  return res.json({ upcomingDuties, filter, total: upcomingDuties.length });
+});
+
+// 6. Get Monthly Calendar
+dutyRouter.get('/calendar', authenticateUser, (req, res) => {
+  const monthParam = (req.query.month as string) || format(new Date(), 'yyyy-MM');
+
+  const startDateIso = `${monthParam}-01T00:00:00`;
+  const endDateIso = `${monthParam}-31T23:59:59`;
+
+  const rows = db.prepare(`
+    SELECT d.*, p.army_number, p.rank, p.name, p.trade, p.current_status
+    FROM duties d
+    JOIN personnel p ON d.personnel_id = p.id
+    WHERE COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') <= ?
+      AND COALESCE(d.end_date_time, CASE WHEN d.end_time <= d.start_time THEN date(d.date, '+1 day') || 'T' || d.end_time || ':00' ELSE d.date || 'T' || d.end_time || ':00' END) >= ?
+    ORDER BY COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') ASC
+  `).all(endDateIso, startDateIso);
+
+  const dateMap: Record<string, any[]> = {};
+  rows.forEach((r: any) => {
+    const sdt = r.start_date_time || `${r.date}T${r.start_time}:00`;
+    const edt = r.end_date_time || (r.end_time <= r.start_time ? `${format(addDays(parseISO(r.date), 1), 'yyyy-MM-dd')}T${r.end_time}:00` : `${r.date}T${r.end_time}:00`);
+    const startDateStr = sdt.split('T')[0];
+    const endDateStr = edt.split('T')[0];
+
+    const dutyObj = {
+      id: r.id,
+      date: r.date,
+      personnelId: r.personnel_id,
+      dutyType: r.duty_type,
+      dutyRole: r.duty_role || (r.duty_type === 'Kote Duty' || r.duty_type === 'RP Duty' ? 'Guard' : r.duty_type),
+      shiftName: r.shift_name || 'General',
+      koteCycle: r.kote_cycle,
+      koteGroup: r.kote_group,
+      location: r.location,
+      startTime: r.start_time,
+      endTime: r.end_time,
+      startDateTime: sdt,
+      endDateTime: edt,
+      durationHours: r.duration_hours,
+      isNightDuty: Boolean(r.is_night_duty),
+      nightDutyHours: r.night_duty_hours,
+      activeStatus: computeDutyActiveStatus(sdt, edt),
+      armyNumber: r.army_number,
+      rank: r.rank,
+      name: r.name,
+      trade: r.trade,
+      currentStatus: r.current_status,
+    };
+
+    if (startDateStr.startsWith(monthParam)) {
+      if (!dateMap[startDateStr]) dateMap[startDateStr] = [];
+      dateMap[startDateStr].push(dutyObj);
+    }
+
+    if (endDateStr !== startDateStr && endDateStr.startsWith(monthParam)) {
+      if (!dateMap[endDateStr]) dateMap[endDateStr] = [];
+      dateMap[endDateStr].push(dutyObj);
+    }
   });
 
   return res.json({ month: monthParam, dateMap, totalDuties: rows.length });
@@ -598,17 +671,23 @@ dutyRouter.get('/calendar', authenticateUser, (req, res) => {
 
 // 7. Get Currently On Duty
 dutyRouter.get('/currently-on-duty', authenticateUser, (req, res) => {
-  const todayStr = format(new Date(), 'yyyy-MM-dd');
+  const now = new Date();
+  const nowIso = format(now, "yyyy-MM-dd'T'HH:mm:ss");
+
   const rows = db.prepare(`
     SELECT d.*, p.army_number, p.rank, p.name, p.trade, p.current_status
     FROM duties d
     JOIN personnel p ON d.personnel_id = p.id
-    WHERE d.date = ?
-    ORDER BY d.start_time ASC
-  `).all(todayStr);
+    WHERE COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') <= ?
+      AND COALESCE(d.end_date_time, CASE WHEN d.end_time <= d.start_time THEN date(d.date, '+1 day') || 'T' || d.end_time || ':00' ELSE d.date || 'T' || d.end_time || ':00' END) > ?
+    ORDER BY COALESCE(d.start_date_time, d.date || 'T' || d.start_time || ':00') ASC
+  `).all(nowIso, nowIso);
 
-  const onDutyPersonnel = rows
-    .map((r: any) => ({
+  const onDutyPersonnel = rows.map((r: any) => {
+    const startDateTime = r.start_date_time || `${r.date}T${r.start_time}:00`;
+    const endDateTime = r.end_date_time || (r.end_time <= r.start_time ? `${format(addDays(parseISO(r.date), 1), 'yyyy-MM-dd')}T${r.end_time}:00` : `${r.date}T${r.end_time}:00`);
+
+    return {
       id: r.id,
       date: r.date,
       personnelId: r.personnel_id,
@@ -620,17 +699,19 @@ dutyRouter.get('/currently-on-duty', authenticateUser, (req, res) => {
       location: r.location,
       startTime: r.start_time,
       endTime: r.end_time,
+      startDateTime,
+      endDateTime,
       durationHours: r.duration_hours,
       isNightDuty: Boolean(r.is_night_duty),
       nightDutyHours: r.night_duty_hours,
-      activeStatus: computeDutyActiveStatus(r.date, r.start_time, r.end_time),
+      activeStatus: 'ON_DUTY' as const,
       armyNumber: r.army_number,
       rank: r.rank,
       name: r.name,
       trade: r.trade,
       currentStatus: r.current_status,
-    }))
-    .filter((d: any) => d.activeStatus === 'ON_DUTY');
+    };
+  });
 
   return res.json({ onDutyPersonnel, total: onDutyPersonnel.length });
 });
@@ -653,18 +734,21 @@ dutyRouter.post('/', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICER',
     availabilityWarning = `Warning: ${soldier.rank} ${soldier.name} is currently ${soldier.current_status} (${soldier.status_reason || 'Unavailable'}).`;
   }
 
-  // Check for time overlap on the same date
-  const existingDuties = db.prepare('SELECT * FROM duties WHERE personnel_id = ? AND date = ?').all(personnelId, date);
-  let hasOverlap = false;
-  let overlapDutyName = '';
+  const { startDateTime, endDateTime } = computeStartEndDateTime(date, startTime, endTime);
 
-  for (const existing of existingDuties) {
-    if (isTimeOverlap(startTime, endTime, existing.start_time, existing.end_time)) {
-      hasOverlap = true;
-      overlapDutyName = `${existing.duty_type} (${existing.start_time}-${existing.end_time})`;
-      break;
-    }
-  }
+  // Check for time interval overlap against existing duties for this soldier
+  const overlappingDuties = db.prepare(`
+    SELECT * FROM duties
+    WHERE personnel_id = ?
+      AND (
+        COALESCE(start_date_time, date || 'T' || start_time || ':00') < ?
+        AND
+        COALESCE(end_date_time, CASE WHEN end_time <= start_time THEN date(date, '+1 day') || 'T' || end_time || ':00' ELSE date || 'T' || end_time || ':00' END) > ?
+      )
+  `).all(personnelId, endDateTime, startDateTime);
+
+  let hasOverlap = overlappingDuties.length > 0;
+  let overlapDutyName = hasOverlap ? `${overlappingDuties[0].duty_type} (${overlappingDuties[0].start_time}-${overlappingDuties[0].end_time})` : '';
 
   const durationHours = calculateDurationHours(startTime, endTime);
   const { isNightDuty, nightDutyHours } = calculateNightDuty(startTime, endTime);
@@ -674,8 +758,8 @@ dutyRouter.post('/', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICER',
   const createdBy = req.user?.appointment || 'DUTY_OFFICER';
 
   db.prepare(`
-    INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, start_date_time, end_date_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     date,
@@ -686,6 +770,8 @@ dutyRouter.post('/', authenticateUser, requirePermission(['2IC', 'DUTY_OFFICER',
     location || 'Unit Grounds',
     startTime,
     endTime,
+    startDateTime,
+    endDateTime,
     durationHours,
     isNightDuty ? 1 : 0,
     nightDutyHours,
@@ -723,13 +809,14 @@ dutyRouter.post('/batch', authenticateUser, requirePermission(['2IC', 'DUTY_OFFI
   for (const item of dutyList) {
     if (!item.personnelId || !item.dutyType || !item.startTime || !item.endTime) continue;
 
+    const { startDateTime, endDateTime } = computeStartEndDateTime(date, item.startTime, item.endTime);
     const durationHours = calculateDurationHours(item.startTime, item.endTime);
     const { isNightDuty, nightDutyHours } = calculateNightDuty(item.startTime, item.endTime);
     const id = `duty_${Date.now()}_${Math.random().toString(36).substr(2, 5)}_${createdCount}`;
 
     db.prepare(`
-      INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO duties (id, date, personnel_id, duty_type, duty_role, shift_name, location, start_time, end_time, start_date_time, end_date_time, duration_hours, is_night_duty, night_duty_hours, remarks, created_at, updated_at, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       date,
@@ -740,6 +827,8 @@ dutyRouter.post('/batch', authenticateUser, requirePermission(['2IC', 'DUTY_OFFI
       item.location || 'Unit Lines',
       item.startTime,
       item.endTime,
+      startDateTime,
+      endDateTime,
       durationHours,
       isNightDuty ? 1 : 0,
       nightDutyHours,
@@ -751,10 +840,10 @@ dutyRouter.post('/batch', authenticateUser, requirePermission(['2IC', 'DUTY_OFFI
     createdCount++;
   }
 
-  logAudit(req, 'ASSIGN_ROSTER_BATCH', 'DUTY', date, `Batch assigned ${createdCount} duty details on ${date}`);
+  logAudit(req, 'BATCH_ASSIGN_DUTIES', 'DUTY', date, `Batch assigned ${createdCount} duties for ${date}`);
 
   return res.status(201).json({
-    message: `Successfully assigned ${createdCount} duty details for ${date}.`,
+    message: `Batch duty roster created with ${createdCount} personnel assignments.`,
     createdCount,
   });
 });
