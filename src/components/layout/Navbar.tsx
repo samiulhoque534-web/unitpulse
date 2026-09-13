@@ -13,17 +13,19 @@ import {
   ChevronDown,
   Activity,
   Menu,
+  X,
   CheckCircle2,
   AlertTriangle,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface NavbarProps {
+  isSidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   onNavigateToTab?: (tab: string) => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, onNavigateToTab }) => {
+export const Navbar: React.FC<NavbarProps> = ({ isSidebarOpen, onToggleSidebar, onNavigateToTab }) => {
   const { user, logout, switchAppointment } = useAuth();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [onDutyCount, setOnDutyCount] = useState(0);
@@ -58,9 +60,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onToggleSidebar, onNavigateToTab
         <div className="flex items-center space-x-3">
           <button
             onClick={onToggleSidebar}
-            className="lg:hidden p-2 rounded-xl bg-tactical-900 border border-slate-800 text-slate-300 hover:text-white"
+            aria-label={isSidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            className="lg:hidden p-2 rounded-xl bg-tactical-900 border border-slate-800 text-slate-300 hover:text-white transition-colors"
           >
-            <Menu className="w-5 h-5" />
+            {isSidebarOpen ? <X className="w-5 h-5 text-amber-400" /> : <Menu className="w-5 h-5" />}
           </button>
 
           <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-army-600 via-army-700 to-tactical-900 border border-army-400/40 shadow-lg text-white">

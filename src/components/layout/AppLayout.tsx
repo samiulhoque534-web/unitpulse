@@ -14,18 +14,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ activeTab, onSelectTab, ch
   return (
     <div className="min-h-screen bg-tactical-950 text-slate-100 flex flex-col font-sans overflow-x-hidden">
       <Navbar
+        isSidebarOpen={isSidebarOpen}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         onNavigateToTab={(tab) => onSelectTab(tab as NavTab)}
       />
 
-      <div className="flex-1 flex overflow-x-hidden">
-        <Sidebar
-          activeTab={activeTab}
-          onSelectTab={onSelectTab}
-          isOpen={isSidebarOpen}
-          onClose={() => setIsSidebarOpen(false)}
-        />
+      <Sidebar
+        activeTab={activeTab}
+        onSelectTab={onSelectTab}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
 
+      <div className="flex-1 flex overflow-x-hidden">
         <main className="flex-1 lg:pl-64 p-3 sm:p-6 md:p-8 max-w-7xl w-full mx-auto space-y-6 overflow-x-hidden">
           {children}
         </main>
