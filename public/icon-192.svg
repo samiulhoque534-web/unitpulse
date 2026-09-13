@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064e3b" />
+      <stop offset="50%" stop-color="#047857" />
+      <stop offset="100%" stop-color="#022c22" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="100" fill="#020617"/>
+  <!-- Shield Outer -->
+  <path d="M256 60 L410 120 C410 270 340 380 256 430 C172 380 102 270 102 120 Z" fill="url(#bgGrad)" stroke="url(#goldGrad)" stroke-width="14" stroke-linejoin="round"/>
+  <!-- Medical Red/Gold Cross -->
+  <path d="M226 180 H286 V226 H332 V286 H286 V332 H226 V286 H180 V226 H226 Z" fill="url(#goldGrad)" stroke="#78350f" stroke-width="4"/>
+  <!-- Unit Text -->
+  <text x="256" y="385" font-family="monospace, sans-serif" font-weight="900" font-size="34" fill="#fbbf24" text-anchor="middle" letter-spacing="4">55 FD AMB</text>
+</svg>
